@@ -29,7 +29,8 @@ from config import (
     unsigned_bus,
     signed_bus,
     signed_to_unsigned,
-    unsigned_to_signed
+    unsigned_to_signed,
+    run_simulation
 )
 
 
@@ -119,6 +120,7 @@ def simulate():
     global SECOND, DELTA_PHASE
     SECOND = 200
     DELTA_PHASE = compute_delta_phase(1000)
+    HOWMANY = int(round(SECOND * 32000000 / 40000))
 
     fastclk, reset, param_data, param_clk, audio_req, audio_ack, dac_bit = make_fpga_ios()
 
@@ -130,15 +132,14 @@ def simulate():
         param_clk.next = 0
         audio_req.next = 0
         audio_ack.next = 0
-        yield delay(1)
+        yield delay(100)
         reset.next = 1
-        yield delay(1)
+        yield delay(100)
         reset.next = 0
-        # for i in range(8 * SECOND * 32000000 / 40000):
-        for i in range(SECOND * 32000000 / 40000):
-            yield delay(1)
+        for i in range(HOWMANY):
+            yield delay(15.25)
             fastclk.next = 1
-            yield delay(1)
+            yield delay(16)
             fastclk.next = 0
 
     stuff = [
@@ -158,7 +159,7 @@ if __name__ == '__main__':
         fastclk, reset, param_data, param_clk, audio_req, audio_ack, dac_bit = make_fpga_ios()
         toVerilog(fpga, fastclk, reset, param_data, param_clk, audio_req, audio_ack, dac_bit)
     elif 'sim' in sys.argv[1:]:
-        Simulation(traceSignals(simulate)).run()
+        run_simulation(simulate)
     else:
         suite = unittest.TestLoader().loadTestsFromTestCase(TestFpga)
         unittest.TextTestRunner(verbosity=2).run(suite)

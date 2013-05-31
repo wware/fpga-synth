@@ -1,4 +1,4 @@
-from myhdl import Signal, delay, always_comb, instance, intbv, bin, always, now
+from myhdl import Signal, delay, always_comb, instance, intbv, bin, always, now, toVerilog
 
 
 ######### General stuff ################
@@ -32,24 +32,20 @@ def unsigned_bus(numbits):
     return Signal(intbv(0)[numbits:])
 
 def signed_to_unsigned(nbits, _in, _out):
-    __out = unsigned_bus(nbits)
     @always(_in)
-    def drive__out():
-        __out.next = _in + (1 << (nbits - 1))
-    @always(__out)
     def drive_out():
-        _out.next = __out
-    return (drive__out, drive_out)
+        _out.next = _in + (1 << (nbits - 1))
+    return drive_out
 
 def unsigned_to_signed(nbits, _in, _out):
-    __out = signed_bus(nbits)
     @always(_in)
     def drive__out():
-        __out.next = _in - (1 << (nbits - 1))
-    @always(__out)
-    def drive_out():
-        _out.next = __out
-    return (drive__out, drive_out)
+        _out.next = _in - (1 << (nbits - 1))
+    return drive_out
+
+def clip_signed(nbits, x):
+    SIGN_BIT = 1 << (nbits - 1)
+    return min(max(x, -SIGN_BIT), SIGN_BIT - 1)
 
 
 ############## Simulation stuff ################
@@ -57,3 +53,23 @@ def unsigned_to_signed(nbits, _in, _out):
 def compute_delta_phase(freq):
     ONE_HERTZ = 1. * (1 << PHASEWIDTH) / AUDIO_RATE
     return int(round(ONE_HERTZ * freq))
+
+R = """
+initial begin
+    $dumpfile("simulate.vcd");
+    $dumpvars;
+end
+
+"""
+
+def run_simulation(simulate):
+    # Simulation(traceSignals(simulate)).run()
+    # let's use iverilog instead, might be faster
+    toVerilog(simulate)
+    import os
+    n = int(os.popen("grep -n initial simulate.v | sed 's/:.*//'").read())
+    os.system('head -%d simulate.v > _simulate.v' % (n - 1))
+    open('_simulate.v', 'a').write(R)
+    os.system('tail +%d simulate.v >> _simulate.v' % n)
+    os.system('iverilog _simulate.v')
+    os.system('vvp a.out')

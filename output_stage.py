@@ -13,7 +13,8 @@ from config import (
     unsigned_bus,
     signed_bus,
     signed_to_unsigned,
-    unsigned_to_signed
+    unsigned_to_signed,
+    run_simulation
 )
 
 """
@@ -27,8 +28,8 @@ DT = 1./MHZ
 R = 1000
 C = 0.01e-6
 ALPHA = math.exp(-DT / (R * C))
-A = int(round((1. - ALPHA) * (1 << 32)))
-B = int(round(ALPHA * (1 << 16)))
+A = int(round((1. - ALPHA) * (1 << 18)))
+B = int(round(ALPHA * (1 << 18)))
 
 
 # fastclk is the 32 MHz clock to the FPGA
@@ -42,7 +43,7 @@ def interpolator(fastclk, clk, reset, input_data, interp_out):
     # many non-zero bits. By accumulating this difference and right-shifting 22 bits, we
     # arrive almost exactly where we want to end up after 800 accumulations.
 
-    FRACTION_BITS = 16
+    FRACTION_BITS = 22
     delay_1 = signed_bus(N)
     x = signed_bus(N)
     interp_step = signed_bus(N + FRACTION_BITS)
@@ -81,9 +82,10 @@ def delta_sigma_dac(fastclk, clk, reset, input_data, dac_bit):
     interp_result = signed_bus(N)
     interp_result_unsigned = unsigned_bus(N)
     # the input of the Xilinx multiplier is an 18-bit factor
-    vc_estimate = unsigned_bus(16)
+    vc_estimate = unsigned_bus(18)
     # the output of the Xilinx multiplier is a 36-bit product
-    sum_of_products = unsigned_bus(32)
+    sum_of_products = unsigned_bus(36)
+    assert sum_of_products.max == (1 << 36)
     dac_bit_internal = Signal(False)
 
     @always_comb
@@ -97,20 +99,17 @@ def delta_sigma_dac(fastclk, clk, reset, input_data, dac_bit):
         # bits are helpful in keeping out audible artifacts.
         if reset:
             dac_bit_internal.next = 0
-            vc_estimate.next = 1 << 15
+            vc_estimate.next = 1 << 17
         else:
-            dac_bit_internal.next = interp_result_unsigned > (sum_of_products >> (32 - N))
-            vc_estimate.next = sum_of_products >> 16
+            dac_bit_internal.next = interp_result_unsigned > (sum_of_products >> (36 - N))
+            vc_estimate.next = sum_of_products >> 18
 
     @always_comb
     def multiply():
         if dac_bit_internal:
-            if A + (B * vc_estimate) >= (1 << 32):
-                sum_of_products.next = (1 << 32) - 1
-            else:
-                sum_of_products.next = A + (B * vc_estimate)
+            sum_of_products.next = (A << 18) + (B * vc_estimate)
         else:
-                sum_of_products.next = B * vc_estimate
+            sum_of_products.next = B * vc_estimate
 
     things = [
         # Interpolation is a huge help with anti-aliasing.
@@ -125,9 +124,10 @@ def delta_sigma_dac(fastclk, clk, reset, input_data, dac_bit):
 def make_dsig_ios():
     fastclk = Signal(False)
     clk = Signal(False)
+    reset = Signal(False)
     input_data = signed_bus(N)
     dac_bit = Signal(False)
-    return (fastclk, clk, input_data, dac_bit)
+    return (fastclk, clk, reset, input_data, dac_bit)
 
 
 class TestOutputStage(unittest.TestCase):
@@ -135,21 +135,29 @@ class TestOutputStage(unittest.TestCase):
 
 
 def simulate():
-    fastclk, clk, input_data, dac_bit = make_dsig_ios()
-    dsig = delta_sigma_dac(fastclk, clk, input_data, dac_bit)
+    fastclk, clk, reset, input_data, dac_bit = make_dsig_ios()
+    input_2 = signed_bus(N)
+    # dsig = delta_sigma_dac(fastclk, clk, reset, input_data, dac_bit)
+    dsig = delta_sigma_dac(fastclk, clk, reset, input_2, dac_bit)
 
     @instance
     def bench():
         fastclk.next = 0
         clk.next = 0
+        reset.next = 0
         input_data.next = 0
         yield delay(1)
-        for j in range(100):
+        reset.next = 1
+        yield delay(1)
+        reset.next = 0
+        yield delay(1)
+        for j in range(500):
             for i in range(800):
                 fastclk.next = 1
                 yield delay(1)
                 fastclk.next = 0
                 yield delay(1)
+            input_2.next = input_data >> 1
             input_data.next = input_data + 50
             fastclk.next = 1
             clk.next = 1
@@ -166,7 +174,7 @@ if __name__ == '__main__':
         fastclk, clk, input_data, dac_bit = make_dsig_ios()
         toVerilog(dsig, fastclk, clk, input_data, dac_bit)
     elif 'sim' in sys.argv[1:]:
-        Simulation(traceSignals(simulate)).run()
+        run_simulation(simulate)
     else:
         suite = unittest.TestLoader().loadTestsFromTestCase(TestOutputStage)
         unittest.TextTestRunner(verbosity=2).run(suite)
