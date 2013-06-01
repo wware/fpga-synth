@@ -13,8 +13,9 @@ from config import signed_bus, unsigned_bus, signed_to_unsigned, clip_signed
 NBITS = 24
 FFF = (1 << NBITS) - 1
 SIGN_BIT = 1 << (NBITS - 1)
+
 SINE_TABLE_SIZE = 4096
-SINE_TABLE_MAX = int(0.8 * SIGN_BIT)
+SINE_TABLE_MAX = int(0.03 * SIGN_BIT)
 sine_values = []
 for i in range(SINE_TABLE_SIZE):
     phase = 2 * math.pi * i / SINE_TABLE_SIZE
@@ -24,10 +25,10 @@ for i in range(SINE_TABLE_SIZE):
 sine_values = []
 for i in range(SINE_TABLE_SIZE):
     phase = -1. + 2. * i / SINE_TABLE_SIZE
-    sine_values.append(int(round(10000 * phase)))
+    sine_values.append(int(round(SINE_TABLE_MAX * phase)))
 
-FREQ_RATIO = 10000
-ITERATIONS = 50000
+FREQ_RATIO = 1000
+ITERATIONS = 5000
 
 # This is -dt/RC for the fast frequency
 alpha = math.exp(-0.01)   # a number close to 1
@@ -40,7 +41,7 @@ def dsig(clk, _input, dac_bit):
     q = signed_bus(NBITS)
     dac_bit_internal = Signal(False)
 
-    PUSH = 15000
+    PUSH = FFF
 
     @always_comb
     def drive_bits():
@@ -52,7 +53,8 @@ def dsig(clk, _input, dac_bit):
     @always(clk.posedge)
     def clock_tick():
         q.next = y >> 8
-        if _input > q:
+        # if _input > q:
+        if _input > (y >> 8):
             dac_bit_internal.next = 1
             dac_bit.next = 1
         else:
