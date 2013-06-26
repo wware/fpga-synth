@@ -10,8 +10,11 @@ class Point:
         self.x = x
         self.y = y
 
+    def __repr__(self):
+        return '(%f, %f)' % (self.x, self.y)
+
     def transform(self, xfm):
-        return Point(xfm.scale * self.x + xfm.origin.x, xfm.scale * self.y + xfm.origin.y)
+        return Point(xfm.scale * (self.x + xfm.origin.x), xfm.scale * (self.y + xfm.origin.y))
 
     def moveto(self, stream):
         stream.write('%f %f moveto ' % (self.x, self.y))
@@ -74,6 +77,9 @@ class Path:
     def __init__(self, *points):
         self.points = points
 
+    def __repr__(self):
+        return '<' + self.__class__.__name__ + ' ' + repr(self.points) + '>'
+
     def transform(self, xfm):
         return apply(Path, tuple([p.transform(xfm) for p in self.points]))
 
@@ -82,7 +88,20 @@ class Path:
         self.points[0].moveto(stream)
         for p in self.points[1:]:
             p.lineto(stream)
-        stream.write('stroke ')
+        stream.write('stroke\n')
+
+
+class Hole:
+    def __init__(self, center, radius):
+        self.center = center
+        self.radius = radius
+
+    def transform(self, xfm):
+        return Hole(self.center.transform(xfm), xfm.scale * self.radius)
+
+    def render(self, stream):
+        stream.write('newpath ')
+        stream.write('%f %f %f 0 360 arc stroke\n' % (self.center.x, self.center.y, self.radius))
 
 
 class Polygon(Path):
@@ -99,8 +118,8 @@ class PostscriptPage:
         page.paths = [path.transform(xfm) for path in self.paths]
         return page
 
-    def add_path(self, *points):
-        self.paths.append(apply(Path, points))
+    def add_path(self, path):
+        self.paths.append(path)
 
     def add_paths(self, *paths):
         [self.paths.append(path) for path in paths]
@@ -109,9 +128,27 @@ class PostscriptPage:
         self.paths.append(apply(Polygon, points))
 
     def render(self, stream=sys.stdout):
-        stream.write('%!PS\n')
+        # compute bounding box
+        xmin = ymin = 1.e20
+        xmax = ymax = -1.e20
+        for path in self.paths:
+            if isinstance(path, Path):
+                for p in path.points:
+                    xmin = min(xmin, p.x)
+                    xmax = max(xmax, p.x)
+                    ymin = min(ymin, p.y)
+                    ymax = max(ymax, p.y)
+            elif isinstance(path, Hole):
+                x, y, r = path.center.x, path.center.y, path.radius
+                xmin = min(xmin, x - r)
+                xmax = max(xmax, x + r)
+                ymin = min(ymin, y - r)
+                ymax = max(ymax, y + r)
+        stream.write('%!PS-Adobe-3.0 EPSF-3.0\n')
+        # llx lly urx ury
+        stream.write('%%BoundingBox: %f %f %f %f\n' % (xmin, ymin, xmax, ymax))
         [path.render(stream) for path in self.paths]
-        stream.write('\nshowpage\n')
+        stream.write('showpage\n')
 
 
 def sierpinski(p1, p2, p3, gap=0., depth=5, minsize=0.):
@@ -132,4 +169,4 @@ def sierpinski(p1, p2, p3, gap=0., depth=5, minsize=0.):
 
 
 
-PS_SPACE = Transformation(72, Point(36, 36))    # PS is 72 DPI, make a half-inch margin
+PS_SPACE = Transformation(72, Point())    # PS is 72 DPI

@@ -36,4 +36,4 @@ c1 = h * c + (1 - h) * d
 
 apply(page.add_paths, pslib.sierpinski(a1, b1, c1, depth=3, gap=0.5))
 
-page.transform(pslib.PS_SPACE.rescale(0.2).translate(pslib.Point(0, 3 * 72))).render()
+page.transform(pslib.PS_SPACE.rescale(0.2).translate(pslib.Point(1, 1))).render()
