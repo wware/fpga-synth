@@ -1,6 +1,30 @@
 An electronic musical instrument
 ================================
 
+The stuff below is the thinking I was doing a few months back. Then I had the
+idea of making a FPGA board for either the Raspberry Pi or Beaglebone Black
+which would be a sort of audio coprocessor, with stereo 14-bit serial ADCs and
+DACs, with a sort of DSP-ish instruction set, and the hardware for the board
+mostly following the hardware on the Papilio Pro. So I noodled around with that
+idea, and realized that in order to make it generally programmable with a lot
+of hardware parallelism was to have an impossibly large crossbar switch. So
+that idea is shelved for later, and I'm back to specifically a music
+synthesizer.
+
+I foresook the Raspberry Pi because I had been reading about how impoverished
+it is for GPIO pins, and I figured that would be horrible for trying to get
+parameters and control signals in and out of the FPGA. But now I'm inclined to
+think that SPI should be fast enough, so I'm going down that route for a while.
+
+Meanwhile I'm also planning to rework the Python/MyHDL code a bit. I want to
+give more thought to design for testability, both in the design phase (when
+"test" means unit tests and simulations) and in silico (when "test" might mean
+something more like halting all the clocks and pulling out information via
+JTAG).
+
+Earlier thoughts
+----------------
+
 The ultimate goal of the FPGA synthesizer work is to build a self-contained
 electronic musical instrument. When I first started thinking about it at in my
 twenties, I envisioned building it into a piece of PVC tubing four or five long

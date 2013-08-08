@@ -1,8 +1,28 @@
+#!/usr/bin/env python
+
+"""\
+MyHDL code for music-box mode of the FPGA synthesizer
+
+Usage:
+  PROG [options]
+
+Options:
+  -s --sim        run a simulation
+  -h --hdl        generate Verilog
+  -t --unit-test  run unit tests
+"""
+
+import docopt
 import sys
 from myhdl import *
 
+options = docopt.docopt(__doc__.replace('PROG', sys.argv[0]))
+
 
 def genclocks(clk, clk40, clk2):
+    """
+    Given a 32 MHz clock, generate clocks at 40 kHz and 2 Hz.
+    """
     counter1 = Signal(intbv(0)[10:])
     counter2 = Signal(intbv(0)[15:])
 
@@ -13,6 +33,9 @@ def genclocks(clk, clk40, clk2):
             counter1.next = 0
             if counter2 >= 19999:
                 counter2.next = 0
+                clk2.next = 0
+            elif counter2 == 1:
+                counter2.next = counter2 + 1
                 clk2.next = 1
             else:
                 counter2.next = counter2 + 1
@@ -25,7 +48,25 @@ def genclocks(clk, clk40, clk2):
     return foo
 
 
+# Calculate dphase values for the white piano keys for 3 octaves, not
+# including the highest C.
+if sys.argv[1:2] == ['calculate']:
+    k = (440. * (1<<24) / 40000) / (2 ** 0.75)
+    j = 0
+    for octave in range(3):
+        for i in (0, 2, 4, 5, 7, 9, 11):
+            p = 12.0 * octave + i
+            count = (2.0 ** (p / 12)) * k
+            print j, int(count + 0.5)
+            j += 1
+    sys.exit(0)
+
+
 def get_freq(clk, pitch, freq):
+    """
+    Using dphase values above, map pitch (as an index of the white piano keys)
+    to dphase value, from middle C to the C two octaves higher.
+    """
     @always(clk.posedge)
     def foo():
         if pitch == 0:
@@ -62,6 +103,7 @@ def get_freq(clk, pitch, freq):
             freq.next = 0
     return foo
 
+
 def voice(clk, clk40, keydn, dphase, _out):
     ampl = Signal(intbv(0)[14:])
     phase = Signal(intbv(0)[24:])
@@ -74,11 +116,13 @@ def voice(clk, clk40, keydn, dphase, _out):
         if clk40:
             if ampl > 0:
                 ampl.next = ampl - 1
-            phase.next = phase + dphase
+            phase.next = (phase + dphase) & ((1 << 24) - 1)
             if (phase & (1 << 23)) != 0:
                 twave.next = ((1 << 24) - 1 - phase) >> 9
             else:
                 twave.next = phase >> 9
+            # ampl is unsigned, twave is signed. This is how you multiply a
+            # signed int by an unsigned int to get a signed result.
             _out.next = ((((1<<14) - 1 - ampl) << 13) + ampl * twave) >> 14
 
     return piece1
@@ -104,7 +148,7 @@ def dacwriter(clk, clk40, dac_data, dacbit, cs_active):
         elif dac_counter < 16:
             if dac_counter == 15:
                 cs_active.next = 0
-            dac_counter.next = dac_counter + 1
+            dac_counter.next = (dac_counter + 1) & 15
 
     return (count, drive_dacbit)
 
@@ -218,18 +262,30 @@ def fpga(clk, out_a, out_b, out_c, out_d):
     return (g, dw, t, out_acd, v1, v2, v3)
 
 
-if sys.argv[1:2] == ['calculate']:
-    k = (440. * (1<<24) / 40000) / (2 ** 0.75)
-    j = 0
-    for octave in range(3):
-        for i in (0, 2, 4, 5, 7, 9, 11):
-            p = 12.0 * octave + i
-            count = (2.0 ** (p / 12)) * k
-            print j, int(count + 0.5)
-            j += 1
-    sys.exit(0)
+def simulate():
+    out_a, out_b, out_c, out_d = [Signal(False) for i in range(4)]
+    clk = Signal(False)
+    _fpga = fpga(clk, out_a, out_b, out_c, out_d)
+
+    @instance
+    def bench():
+        clk.next = 0
+        for i in range(1000000):
+            yield delay(1)
+            clk.next = 1
+            yield delay(1)
+            clk.next = 0
+
+    return (bench, _fpga)
 
 
-out_a, out_b, out_c, out_d = [Signal(False) for i in range(4)]
-clk = Signal(False)
-toVerilog(fpga, clk, out_a, out_b, out_c, out_d)
+if options['--hdl']:
+    out_a, out_b, out_c, out_d = [Signal(False) for i in range(4)]
+    clk = Signal(False)
+    toVerilog(fpga, clk, out_a, out_b, out_c, out_d)
+
+if options['--sim']:
+    Simulation(traceSignals(simulate)).run()
+
+if options['--unit-test']:
+    raise Exception('not implemented yet')
